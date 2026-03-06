@@ -179,7 +179,8 @@ python main.py \
     --num_candidates 100 \
     --eval_ks 1 5 10 20 \
     --second_batch_size 8 \
-    --second_total_epoch 5 \
+    --second_total_epoch 2 \
+    --first_total_epoch  2 \
     --second_model_path ./model_beauty
 ```
 
