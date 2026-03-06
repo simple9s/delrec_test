@@ -205,6 +205,10 @@ class LLaMA3Recommender(nn.Module):
         else:
             inputs_embeds = self.llm.get_input_embeddings()(input_ids)
 
+        # 统一转为 LLM dtype
+        llm_dtype = next(self.llm.parameters()).dtype
+        inputs_embeds = inputs_embeds.to(llm_dtype)
+
         last_hidden = self._get_last_hidden(inputs_embeds, attention_mask)  # (B, S, H)
         seq_lens    = attention_mask.sum(dim=1) - 1                          # (B,)
         last_vecs   = last_hidden[torch.arange(B), seq_lens]                 # (B, H)

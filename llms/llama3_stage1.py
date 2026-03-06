@@ -288,6 +288,10 @@ class LLaMA3Stage1Model(nn.Module):
             with torch.no_grad():
                 inputs_embeds = backbone.llm.get_input_embeddings()(input_ids)
 
+        # 转换为 LLM 的 dtype（8-bit 量化下通常是 float16）
+        llm_dtype = next(backbone.llm.parameters()).dtype
+        inputs_embeds = inputs_embeds.to(llm_dtype)
+
         # hook 只存最后一层，不用 output_hidden_states=True
         last_hidden = {}
         def hook(module, input, output):
