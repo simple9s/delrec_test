@@ -34,8 +34,28 @@ from llms.llama3_wrapper import (
     load_llama3_tokenizer,
     SYSTEM_PROMPT,
 )
-from MTL.MTL import dynamic_loss_weighting
 from utils import init_metrics, update_metrics, finalize_metrics, metrics_to_str, EVAL_KS
+
+
+def dynamic_loss_weighting(loss_a: torch.Tensor, loss_b: torch.Tensor,
+                            shared_param: torch.Tensor) -> torch.Tensor:
+    """
+    简化版 GradNorm 动态损失权重：
+    根据两个任务对共享参数的梯度范数比例，自动平衡损失权重。
+    若梯度计算失败则退化为等权重。
+    """
+    try:
+        g_a = torch.autograd.grad(loss_a, shared_param, retain_graph=True,
+                                  create_graph=False)[0]
+        g_b = torch.autograd.grad(loss_b, shared_param, retain_graph=True,
+                                  create_graph=False)[0]
+        norm_a = g_a.norm().item() + 1e-8
+        norm_b = g_b.norm().item() + 1e-8
+        w_a = norm_b / (norm_a + norm_b)
+        w_b = norm_a / (norm_a + norm_b)
+        return w_a * loss_a + w_b * loss_b
+    except Exception:
+        return 0.5 * loss_a + 0.5 * loss_b
 
 
 # ─────────────────────────────────────────────────────────────────────────────

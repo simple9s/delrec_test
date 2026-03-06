@@ -170,17 +170,17 @@ $$\text{NDCG@K} = \frac{1}{|U|} \sum_{u} \frac{\mathbf{1}[\text{rank}_u \leq K]}
 ### 训练（LLaMA 3 + Amazon 2018，自动下载数据）
 
 ```bash
-python -m DELRec.main \
+python main.py \
     --llm llama3 \
-    --llm_path ./Llama-3.2-3B-Instruct \
+    --llm_path meta-llama/Llama-3.2-3B-Instruct \
     --mode train \
     --amazon_version 2018 \
-    --amazon_category Movies_and_TV \
+    --amazon_category Luxury_Beauty \
     --num_candidates 100 \
     --eval_ks 1 5 10 20 \
     --second_batch_size 8 \
-    --second_total_epoch 20 \
-    --second_model_path ./model_llama3
+    --second_total_epoch 5 \
+    --second_model_path ./model_beauty
 ```
 
 ### 测试

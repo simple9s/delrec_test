@@ -256,7 +256,10 @@ def training_of_second_stage(args, learned_soft_prompt_path: str = None):
     from openprompt import PromptForClassification
     from openprompt.plms import load_plm
     from peft import AdaLoraConfig, get_peft_model
-    from MTL.MTL import dynamic_loss_weighting
+    try:
+        from MTL.MTL import dynamic_loss_weighting
+    except ImportError:
+        def dynamic_loss_weighting(a, b, *args, **kwargs): return 0.5*a + 0.5*b
     from utils import creat_Verbalizer, calculate_metrics, evaluate
     from distill_pattern_from_conventional_SR_models.temporal_analysis import load_TA_dataset
     from distill_pattern_from_conventional_SR_models.recommendation_pattern_simulating import load_RPS_dataset
