@@ -161,7 +161,8 @@ class LLaMA3Recommender(nn.Module):
         # ── 冻结 LLM（第一阶段只训练 soft-prompt & classifier）────────────────
         if freeze_llm:
             for param in self.llm.parameters():
-                param.requires_grad = False
+                if param.dtype in (torch.float16, torch.bfloat16, torch.float32):
+                    param.requires_grad = False
 
     def _get_last_hidden(self, inputs_embeds, attention_mask):
         """用 hook 只捕获最后一层隐向量，避免 output_hidden_states=True 存全部28层。"""

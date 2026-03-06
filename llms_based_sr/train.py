@@ -113,8 +113,10 @@ def training_of_second_stage_llama3(args, learned_soft_prompt_path: str = None):
         print("[Stage2] ⚠ 未找到第一阶段权重，soft-prompt 使用随机初始化")
 
     # 解冻 LLM 并应用 LoRA
+    # 只对浮点参数解冻（8-bit 量化模型含有整型张量，不能设 requires_grad）
     for param in model.llm.parameters():
-        param.requires_grad = True
+        if param.dtype in (torch.float16, torch.bfloat16, torch.float32):
+            param.requires_grad = True
     if getattr(args, 'second_if_peft', True):
         model.apply_lora(
             r=args.second_lora_r,
