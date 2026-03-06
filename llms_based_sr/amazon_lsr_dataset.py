@@ -37,7 +37,8 @@ def load_amazon_LSR_dataset(args):
     # ── 1. 加载 & 缓存 Amazon 原始数据 ─────────────────────────────────────────
     splits, item2title = load_amazon_dataset(
         dataset_version=args.amazon_version,
-        review_path=args.amazon_review_path,
+        category=getattr(args, 'amazon_category', 'Movies_and_TV'),
+        review_path=getattr(args, 'amazon_review_path', '') or None,
         meta_path=getattr(args, 'amazon_meta_path', '') or None,
         cache_dir=getattr(args, 'amazon_cache_dir', './cache'),
         num_candidates=getattr(args, 'num_candidates', 100),

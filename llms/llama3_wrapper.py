@@ -338,9 +338,14 @@ def collate_llama3_batch(
     texts  = []
     labels = []
     for item in batch:
+        # user_seq / candidates 可能是 list[str]，统一转为逗号分隔字符串
+        user_seq   = item['user_seq']
+        candidates = item['candidates']
+        if isinstance(user_seq,   list): user_seq   = ', '.join(user_seq)
+        if isinstance(candidates, list): candidates = ', '.join(candidates)
         prompt = build_llama3_prompt(
-            user_seq=item['user_seq'],
-            candidates=item['candidates'],
+            user_seq=user_seq,
+            candidates=candidates,
             model_name=item.get('model_name', 'SASRec'),
         )
         texts.append(prompt)
