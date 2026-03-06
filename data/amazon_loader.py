@@ -177,16 +177,19 @@ def leave_one_out_split(
     item2title: Dict[int, str],
     num_candidates: int = 100,
     seed: int = 42,
+    min_seq_len: int = 5,       # 与 min_interactions 保持一致
 ) -> dict:
     """
-    留一法切分，每条记录格式：
-        user_id, user_seq(list[str]), pos_item(str),
-        candidates(list[str]), label_idx(int)
+    留一法切分。
+    要生成 train/val/test 三条记录，至少需要 4 条交互：
+        train 历史 ≥ 1 条 + train正 + val正 + test正 = 4
+    min_seq_len 默认 5，与 load_amazon_dataset 的 min_interactions 对齐。
     """
     rng = random.Random(seed)
     all_item_set = set(item2title.keys())
     splits: Dict[str, List[dict]] = {'train': [], 'val': [], 'test': []}
 
+    skipped = 0
     def _make(uid: int, hist: List[int], pos: int) -> dict:
         negs  = _sample_negatives(pos, hist, all_item_set, num_candidates - 1, rng)
         cands = [pos] + negs
@@ -200,13 +203,15 @@ def leave_one_out_split(
         }
 
     for uid, seq in tqdm(interactions.items(), desc='[LOO] 构建切分'):
-        if len(seq) < 3:
+        if len(seq) < min_seq_len:
+            skipped += 1
             continue
         splits['test'].append(_make(uid, seq[:-1], seq[-1]))
         splits['val'].append( _make(uid, seq[:-2], seq[-2]))
         if len(seq) >= 4:
             splits['train'].append(_make(uid, seq[:-3], seq[-3]))
 
+    print(f"[LOO] 过滤用户（交互数 < {min_seq_len}）: {skipped} 人")
     print(f"[LOO] train={len(splits['train'])}  "
           f"val={len(splits['val'])}  test={len(splits['test'])}")
     return splits
@@ -296,7 +301,8 @@ def load_amazon_dataset(
     else:
         raise ValueError(f"不支持的版本: {dataset_version}")
 
-    splits = leave_one_out_split(interactions, item2title, num_candidates, seed)
+    splits = leave_one_out_split(interactions, item2title, num_candidates, seed,
+                                  min_seq_len=min_interactions)
     result = (splits, item2title)
 
     with open(cache_file, 'wb') as f:
