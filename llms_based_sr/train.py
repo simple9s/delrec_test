@@ -133,6 +133,8 @@ def training_of_second_stage_llama3(args, learned_soft_prompt_path: str = None):
     device   = torch.device('cuda' if use_cuda else 'cpu')
     # 注：LLaMA3Recommender 内部使用 device_map="auto"，分类头需单独移动
     model.classifier = model.classifier.to(device)
+    if model.soft_embeddings is not None:
+        model.soft_embeddings = model.soft_embeddings.to(device)
 
     # ── 优化器 ────────────────────────────────────────────────────────────────
     try:

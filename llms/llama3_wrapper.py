@@ -170,7 +170,7 @@ class LLaMA3Recommender(nn.Module):
             # 在 token embedding 前拼接 soft-prompt
             token_embeds  = self.llm.get_input_embeddings()(input_ids)  # (B,L,H)
             soft_tok_idx  = torch.arange(self.soft_prompt_len, device=input_ids.device)
-            soft_emb      = self.soft_embeddings(soft_tok_idx)           # (S,H)
+            soft_emb      = self.soft_embeddings(soft_tok_idx).to(token_embeds.device)  # (S,H)
             soft_emb      = soft_emb.unsqueeze(0).expand(B, -1, -1)     # (B,S,H)
             inputs_embeds = torch.cat([soft_emb, token_embeds], dim=1)  # (B,S+L,H)
 

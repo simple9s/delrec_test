@@ -277,7 +277,8 @@ class LLaMA3Stage1Model(nn.Module):
         if backbone.soft_embeddings is not None:
             token_embeds  = backbone.llm.get_input_embeddings()(input_ids)
             soft_idx      = torch.arange(backbone.soft_prompt_len, device=input_ids.device)
-            soft_emb      = backbone.soft_embeddings(soft_idx).unsqueeze(0).expand(B, -1, -1)
+            soft_emb      = backbone.soft_embeddings(soft_idx).to(token_embeds.device)
+            soft_emb      = soft_emb.unsqueeze(0).expand(B, -1, -1)
             inputs_embeds = torch.cat([soft_emb, token_embeds], dim=1)
             soft_mask     = torch.ones(B, backbone.soft_prompt_len,
                                        dtype=attention_mask.dtype,
@@ -397,6 +398,8 @@ def training_of_first_stage_llama3(args, splits: dict) -> str:
     # 分类头移到 device，LLM 由 device_map="auto" 管理
     model.ta_head  = model.ta_head.to(device)
     model.rps_head = model.rps_head.to(device)
+    if backbone.soft_embeddings is not None:
+        backbone.soft_embeddings = backbone.soft_embeddings.to(device)
 
     # ── 优化器：只更新 soft_embeddings + 两个任务头 ───────────────────────────
     trainable_params = model.get_soft_prompt_params() + model.get_head_params()
