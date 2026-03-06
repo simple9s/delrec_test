@@ -40,19 +40,17 @@ from utils import init_metrics, update_metrics, finalize_metrics, metrics_to_str
 def dynamic_loss_weighting(loss_a: torch.Tensor, loss_b: torch.Tensor,
                             shared_param: torch.Tensor) -> torch.Tensor:
     """
-    简化版 GradNorm 动态损失权重：
-    根据两个任务对共享参数的梯度范数比例，自动平衡损失权重。
-    若梯度计算失败则退化为等权重。
+    简化版动态损失权重：根据梯度范数比例平衡两个任务。
+    注意：不使用 retain_graph，避免计算图堆积占用显存。
     """
     try:
-        g_a = torch.autograd.grad(loss_a, shared_param, retain_graph=True,
-                                  create_graph=False)[0]
-        g_b = torch.autograd.grad(loss_b, shared_param, retain_graph=True,
-                                  create_graph=False)[0]
-        norm_a = g_a.norm().item() + 1e-8
-        norm_b = g_b.norm().item() + 1e-8
-        w_a = norm_b / (norm_a + norm_b)
-        w_b = norm_a / (norm_a + norm_b)
+        with torch.no_grad():
+            # 用 loss 值本身估算权重，避免二次反向传播的显存开销
+            la = loss_a.item()
+            lb = loss_b.item()
+            total = la + lb + 1e-8
+            w_a = lb / total   # 对方 loss 大时自己权重大（GradNorm 核心思想的近似）
+            w_b = la / total
         return w_a * loss_a + w_b * loss_b
     except Exception:
         return 0.5 * loss_a + 0.5 * loss_b
@@ -270,31 +268,43 @@ class LLaMA3Stage1Model(nn.Module):
 
     def _get_hidden(self, input_ids: torch.Tensor,
                     attention_mask: torch.Tensor) -> torch.Tensor:
-        """提取最后一个有效 token 的隐向量，复用 backbone 的 soft-prompt 拼接逻辑。"""
+        """只捕获最后一层隐向量（hook），LLM 冻结用 no_grad 节省显存。"""
         B = input_ids.shape[0]
         backbone = self.backbone
 
         if backbone.soft_embeddings is not None:
-            token_embeds  = backbone.llm.get_input_embeddings()(input_ids)
-            soft_idx      = torch.arange(backbone.soft_prompt_len, device=input_ids.device)
-            soft_emb      = backbone.soft_embeddings(soft_idx).to(token_embeds.device)
-            soft_emb      = soft_emb.unsqueeze(0).expand(B, -1, -1)
+            soft_idx  = torch.arange(backbone.soft_prompt_len, device=input_ids.device)
+            soft_emb  = backbone.soft_embeddings(soft_idx).to(input_ids.device)
+            soft_emb  = soft_emb.unsqueeze(0).expand(B, -1, -1)
+            soft_mask = torch.ones(B, backbone.soft_prompt_len,
+                                   dtype=attention_mask.dtype,
+                                   device=attention_mask.device)
+            full_mask = torch.cat([soft_mask, attention_mask], dim=1)
+            with torch.no_grad():
+                token_embeds = backbone.llm.get_input_embeddings()(input_ids)
             inputs_embeds = torch.cat([soft_emb, token_embeds], dim=1)
-            soft_mask     = torch.ones(B, backbone.soft_prompt_len,
-                                       dtype=attention_mask.dtype,
-                                       device=attention_mask.device)
-            attention_mask = torch.cat([soft_mask, attention_mask], dim=1)
-            outputs = backbone.llm(inputs_embeds=inputs_embeds,
-                                   attention_mask=attention_mask,
-                                   output_hidden_states=True)
         else:
-            outputs = backbone.llm(input_ids=input_ids,
-                                   attention_mask=attention_mask,
-                                   output_hidden_states=True)
+            full_mask = attention_mask
+            with torch.no_grad():
+                inputs_embeds = backbone.llm.get_input_embeddings()(input_ids)
 
-        last_hidden = outputs.hidden_states[-1]            # (B, S, H)
-        seq_lens    = attention_mask.sum(dim=1) - 1        # (B,)
-        return last_hidden[torch.arange(B), seq_lens].float()  # (B, H)
+        # hook 只存最后一层，不用 output_hidden_states=True
+        last_hidden = {}
+        def hook(module, input, output):
+            last_hidden['h'] = output[0].detach().float()
+        handle = backbone.llm.model.layers[-1].register_forward_hook(hook)
+        try:
+            with torch.no_grad():
+                backbone.llm(inputs_embeds=inputs_embeds, attention_mask=full_mask)
+        finally:
+            handle.remove()
+
+        h        = last_hidden['h']                       # (B, S, H)
+        seq_lens = full_mask.sum(dim=1) - 1               # (B,)
+        # detach 后 requires_grad，让任务头的梯度能反传
+        last_vecs = h[torch.arange(B), seq_lens]
+        last_vecs = last_vecs.detach().requires_grad_(True)
+        return last_vecs
 
     def forward_ta(self, input_ids, attention_mask) -> torch.Tensor:
         h = self._get_hidden(input_ids, attention_mask)
@@ -531,6 +541,13 @@ def training_of_first_stage_llama3(args, splits: dict) -> str:
     # 训练结束确保保存一次（防止验证步骤未触发）
     if not os.path.exists(os.path.join(soft_prompt_save_path, 'stage1.pt')):
         model.save_soft_prompt(soft_prompt_save_path)
+
+    # ── 显式释放模型显存 ──────────────────────────────────────────────────────
+    import gc
+    del model, backbone, optimizer, train_loader, val_loader
+    gc.collect()
+    torch.cuda.empty_cache()
+    print(f"[Stage1] 显存已释放")
 
     return soft_prompt_save_path
 

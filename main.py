@@ -48,6 +48,11 @@ def main(args):
                 auto_download=True,
             )
             soft_prompt_path = training_of_first_stage_llama3(args, splits)
+            # ── 释放 Stage1 显存，再加载 Stage2 ──────────────────────────────
+            import gc, torch
+            gc.collect()
+            torch.cuda.empty_cache()
+            print("[Memory] Stage1 模型已释放，开始 Stage2")
             # 第二阶段：加载 soft-prompt，解冻 LLM，LoRA 微调
             training_of_second_stage(args, soft_prompt_path)
         else:
@@ -68,8 +73,8 @@ if __name__ == '__main__':
     # ── 基础 ──────────────────────────────────────────────────────────────────
     parser.add_argument('--device',       default='cuda', choices=['cuda', 'cpu'])
     parser.add_argument('--parallelize',  default=True,  type=bool)
-    parser.add_argument('--llm_path',     default='./Llama-3.2-3B-Instruct', type=str,
-                        help='LLM 本地路径或 HuggingFace Hub ID')
+    parser.add_argument('--llm_path',     default='meta-llama/Llama-3.2-3B-Instruct', type=str,
+                        help='LLM 本地绝对路径 或 HuggingFace Hub ID')
     parser.add_argument('--llm',          default='llama3',
                         choices=['t5', 'roberta', 'bert', 'albert',
                                  'gpt', 'gpt2', 'opt', 'llama', 'llama3'],
@@ -132,7 +137,7 @@ if __name__ == '__main__':
     parser.add_argument('--first_weight_decay',         default=1e-5, type=float)
     parser.add_argument('--first_num_warmup_steps',     default=400,  type=int)
     parser.add_argument('--first_num_training_steps',   default=800,  type=int)
-    parser.add_argument('--first_gradient_accumulation_steps', default=4, type=int)
+    parser.add_argument('--first_gradient_accumulation_steps',  default=1, type=int)
     parser.add_argument('--first_eval_every_steps',     default=2,    type=int)
 
     # ── TA 参数 ───────────────────────────────────────────────────────────────
@@ -175,7 +180,7 @@ if __name__ == '__main__':
     parser.add_argument('--second_teacher_forcing',      default=False, type=bool)
     parser.add_argument('--second_predict_eos_token',    default=False, type=bool)
     parser.add_argument('--second_batch_size',           default=8,    type=int,
-                        help='LLaMA3 建议 8 或更小（显存限制）')
+                        help='batch size')
     parser.add_argument('--second_decoder_max_length',   default=20,   type=int)
     parser.add_argument('--second_truncate_method',      default='tail')
     parser.add_argument('--second_max_seq_length',       default=1024, type=int,
@@ -186,7 +191,7 @@ if __name__ == '__main__':
     parser.add_argument('--second_weight_decay',         default=1e-6, type=float)
     parser.add_argument('--second_num_warmup_steps',     default=100,  type=int)
     parser.add_argument('--second_num_training_steps',   default=500,  type=int)
-    parser.add_argument('--second_gradient_accumulation_steps', default=4, type=int)
+    parser.add_argument('--second_gradient_accumulation_steps', default=1, type=int)
     parser.add_argument('--second_eval_every_steps',     default=50,   type=int)
     parser.add_argument('--second_if_peft',              default=True, type=bool)
     parser.add_argument('--second_peft_type',            default='LORA')

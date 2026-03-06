@@ -115,7 +115,10 @@ class LLaMA3Recommender(nn.Module):
                 bnb_4bit_compute_dtype=torch.bfloat16,
             )
         elif load_in_8bit:
-            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+            bnb_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                bnb_4bit_compute_dtype=torch.float16,  # 显式传入，绕过新版 transformers 的 torch 引用 bug
+            )
 
         quant_label = "4-bit" if load_in_4bit else ("8-bit" if load_in_8bit else "bf16 full")
 
@@ -128,6 +131,14 @@ class LLaMA3Recommender(nn.Module):
             device_map="auto",
             trust_remote_code=True,
         )
+        # 开启梯度检查点，以时间换显存（显存减少约 40%）
+        if hasattr(self.llm, 'gradient_checkpointing_enable'):
+            self.llm.gradient_checkpointing_enable()
+            self.llm.config.use_cache = False  # 梯度检查点与 kv-cache 不兼容
+        # 开启梯度检查点，以计算时间换显存（训练时约节省 30~40% 显存）
+        if hasattr(self.llm, 'gradient_checkpointing_enable'):
+            self.llm.gradient_checkpointing_enable()
+            self.llm.config.use_cache = False  # 梯度检查点与 kv-cache 不兼容
         self.hidden_size = self.llm.config.hidden_size
 
         # ── Soft-prompt embeddings ────────────────────────────────────────────
@@ -152,6 +163,26 @@ class LLaMA3Recommender(nn.Module):
             for param in self.llm.parameters():
                 param.requires_grad = False
 
+    def _get_last_hidden(self, inputs_embeds, attention_mask):
+        """用 hook 只捕获最后一层隐向量，避免 output_hidden_states=True 存全部28层。"""
+        last_hidden = {}
+
+        def hook(module, input, output):
+            # output[0] shape: (B, seq_len, H)
+            last_hidden['h'] = output[0]
+
+        # 注册到最后一个 decoder layer
+        handle = self.llm.model.layers[-1].register_forward_hook(hook)
+        try:
+            self.llm(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+            )
+        finally:
+            handle.remove()
+
+        return last_hidden['h']   # (B, seq_len, H)
+
     # ── 前向传播 ──────────────────────────────────────────────────────────────
 
     def forward(
@@ -159,46 +190,26 @@ class LLaMA3Recommender(nn.Module):
         input_ids: torch.Tensor,       # (B, L)
         attention_mask: torch.Tensor,  # (B, L)
     ) -> torch.Tensor:
-        """
-        Returns
-        -------
-        logits : (B, num_classes)
-        """
         B, L = input_ids.shape
 
         if self.soft_embeddings is not None:
-            # 在 token embedding 前拼接 soft-prompt
-            token_embeds  = self.llm.get_input_embeddings()(input_ids)  # (B,L,H)
-            soft_tok_idx  = torch.arange(self.soft_prompt_len, device=input_ids.device)
-            soft_emb      = self.soft_embeddings(soft_tok_idx).to(token_embeds.device)  # (S,H)
-            soft_emb      = soft_emb.unsqueeze(0).expand(B, -1, -1)     # (B,S,H)
-            inputs_embeds = torch.cat([soft_emb, token_embeds], dim=1)  # (B,S+L,H)
-
-            # 扩展 attention_mask
+            token_embeds   = self.llm.get_input_embeddings()(input_ids)
+            soft_tok_idx   = torch.arange(self.soft_prompt_len, device=input_ids.device)
+            soft_emb       = self.soft_embeddings(soft_tok_idx).to(token_embeds.device)
+            soft_emb       = soft_emb.unsqueeze(0).expand(B, -1, -1)
+            inputs_embeds  = torch.cat([soft_emb, token_embeds], dim=1)
             soft_mask      = torch.ones(B, self.soft_prompt_len,
                                         dtype=attention_mask.dtype,
                                         device=attention_mask.device)
             attention_mask = torch.cat([soft_mask, attention_mask], dim=1)
-
-            outputs = self.llm(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-            )
         else:
-            outputs = self.llm(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-            )
+            inputs_embeds = self.llm.get_input_embeddings()(input_ids)
 
-        # 取最后一层最后一个有效 token 的隐向量
-        last_hidden = outputs.hidden_states[-1]  # (B, seq_len, H)
-        # 找每条样本实际最后一个 token 的位置
-        seq_lens    = attention_mask.sum(dim=1) - 1          # (B,)
-        last_vecs   = last_hidden[torch.arange(B), seq_lens] # (B, H)
+        last_hidden = self._get_last_hidden(inputs_embeds, attention_mask)  # (B, S, H)
+        seq_lens    = attention_mask.sum(dim=1) - 1                          # (B,)
+        last_vecs   = last_hidden[torch.arange(B), seq_lens]                 # (B, H)
 
-        logits = self.classifier(last_vecs.float())  # (B, num_classes)
+        logits = self.classifier(last_vecs.float())
         return logits
 
     # ── PEFT 相关 ──────────────────────────────────────────────────────────────
