@@ -3,46 +3,22 @@ from collections import defaultdict
 import torch
 import torch.nn.functional as F
 import numpy as np
-from openprompt.prompts import ManualVerbalizer
-from openprompt.prompts import MixedTemplate
 
 # ── 评估 K 值 ────────────────────────────────────────────────────────────────
 EVAL_KS = [1, 5, 10, 20]
 
-
-def check_suffix(s):
-    pattern = r",\s(The|A|An)\s\(\d{4}\)$"
-    return bool(re.search(pattern, s))
-
-
-def rearrange_string(s):
-    pattern = r"(.*),\s(The|A|An)\s\((\d{4})\)"
-    return re.sub(pattern, r"\2 \1 (\3)", s)
-
-
-def check_seq_spell(dataset):
-    for index, i in enumerate(dataset):
-        if check_suffix(i):
-            dataset[index] = rearrange_string(i)
-
-
-def find_param(prompt_model, n):
-    params_before = {name: p.clone().cpu() for name, p in prompt_model.named_parameters()}
-    for name in params_before.keys():
-        if n in name:
-            return params_before[name], name
-
-
+# openprompt 相关函数仅在 T5 流程中使用，懒加载避免版本冲突
 def creat_Verbalizer(tokenizer):
+    from openprompt.prompts import ManualVerbalizer
     with open('../title_set.txt', 'r') as f:
         lines = f.readlines()
     cla = [line.strip() for line in lines]
     saspre_label = {item: [item, item[:-7]] for item in cla}
-    myverbalizer = ManualVerbalizer(tokenizer=tokenizer, classes=cla, label_words=saspre_label)
-    return myverbalizer
+    return ManualVerbalizer(tokenizer=tokenizer, classes=cla, label_words=saspre_label)
 
 
 def create_prompt(scriptsbase, plm, tokenizer, prompt_id):
+    from openprompt.prompts import MixedTemplate
     mytemplate = MixedTemplate(model=plm, tokenizer=tokenizer).from_file(
         f'data/prompts/{scriptsbase}.txt', choice=prompt_id)
     return mytemplate

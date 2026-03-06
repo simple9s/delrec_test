@@ -11,8 +11,10 @@ from collections import defaultdict
 import pickle
 import torch
 import numpy as np
-from openprompt.data_utils.utils import InputExample
 from tqdm import tqdm
+
+
+def amazon_to_input_examples(data_list: list, model_name: str = 'SASRec'):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,16 +213,8 @@ def amazon_data_partition(interactions: dict,
 def amazon_to_input_examples(data_list: list, model_name: str = 'SASRec'):
     """
     将 amazon_data_partition 的输出转为 openprompt InputExample 列表。
-
-    Parameters
-    ----------
-    data_list  : list of dict（来自 amazon_data_partition）
-    model_name : SR 模型名称（写入 meta）
-
-    Returns
-    -------
-    examples : list[InputExample]
     """
+    from openprompt.data_utils.utils import InputExample
     examples = []
     for d in data_list:
         user_seq = ', '.join(d['user_seq'])
