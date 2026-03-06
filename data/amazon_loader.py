@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from DELRec.data.download import ensure_amazon_dataset
+from data.download import ensure_amazon_dataset
 
 
 # ─────────────────────────────────────────────────────────────────────────────

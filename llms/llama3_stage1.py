@@ -29,13 +29,13 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 
-from DELRec.llms.llama3_wrapper import (
+from llms.llama3_wrapper import (
     LLaMA3Recommender,
     load_llama3_tokenizer,
     SYSTEM_PROMPT,
 )
-from DELRec.MTL.MTL import dynamic_loss_weighting
-from DELRec.utils import init_metrics, update_metrics, finalize_metrics, metrics_to_str, EVAL_KS
+from MTL.MTL import dynamic_loss_weighting
+from utils import init_metrics, update_metrics, finalize_metrics, metrics_to_str, EVAL_KS
 
 
 # ─────────────────────────────────────────────────────────────────────────────

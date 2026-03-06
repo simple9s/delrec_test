@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 
-from DELRec.utils import (
+from utils import (
     init_metrics, update_metrics, finalize_metrics,
     metrics_to_str, EVAL_KS,
 )
@@ -57,7 +57,7 @@ def training_of_second_stage_llama3(args, learned_soft_prompt_path: str = None):
     使用 LLaMA 3-3B-Instruct 进行第二阶段 LSR 训练。
     learned_soft_prompt_path：第一阶段保存的 stage1.pt 所在目录。
     """
-    from DELRec.llms.llama3_wrapper import (
+    from llms.llama3_wrapper import (
         LLaMA3Recommender, load_llama3_tokenizer, collate_llama3_batch
     )
 
@@ -65,7 +65,7 @@ def training_of_second_stage_llama3(args, learned_soft_prompt_path: str = None):
     num_candidates = getattr(args, 'num_candidates', 100)
 
     # ── 数据加载（与第一阶段共用同一份 splits）────────────────────────────────
-    from DELRec.data.amazon_loader import load_amazon_dataset
+    from data.amazon_loader import load_amazon_dataset
 
     splits, item2title = load_amazon_dataset(
         dataset_version=args.amazon_version,
@@ -256,22 +256,22 @@ def training_of_second_stage(args, learned_soft_prompt_path: str = None):
     from openprompt import PromptForClassification
     from openprompt.plms import load_plm
     from peft import AdaLoraConfig, get_peft_model
-    from DELRec.MTL.MTL import dynamic_loss_weighting
-    from DELRec.utils import creat_Verbalizer, calculate_metrics, evaluate
-    from DELRec.distill_pattern_from_conventional_SR_models.temporal_analysis import load_TA_dataset
-    from DELRec.distill_pattern_from_conventional_SR_models.recommendation_pattern_simulating import load_RPS_dataset
+    from MTL.MTL import dynamic_loss_weighting
+    from utils import creat_Verbalizer, calculate_metrics, evaluate
+    from distill_pattern_from_conventional_SR_models.temporal_analysis import load_TA_dataset
+    from distill_pattern_from_conventional_SR_models.recommendation_pattern_simulating import load_RPS_dataset
 
     ks = getattr(args, 'eval_ks', EVAL_KS)
 
     if getattr(args, 'use_amazon', False):
-        from DELRec.llms_based_sr.amazon_lsr_dataset import load_amazon_LSR_dataset
+        from llms_based_sr.amazon_lsr_dataset import load_amazon_LSR_dataset
         LSR_train, LSR_test, LSR_val = load_amazon_LSR_dataset(args)
     else:
-        from DELRec.llms_based_sr.llms_based_sequential_recommendation import (
+        from llms_based_sr.llms_based_sequential_recommendation import (
             load_LSR_dataset, load_LSR_prompt)
         LSR_train, LSR_test, LSR_val = load_LSR_dataset(args)
 
-    from DELRec.llms_based_sr.llms_based_sequential_recommendation import load_LSR_prompt
+    from llms_based_sr.llms_based_sequential_recommendation import load_LSR_prompt
     LSR_template = load_LSR_prompt(args)
     plm, tokenizer, model_config, WrapperClass = load_plm(args.llm, args.llm_path)
 

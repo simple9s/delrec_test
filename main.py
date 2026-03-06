@@ -9,13 +9,15 @@ DELRec/main.py
 
 import sys
 import os
+# 确保无论从哪个目录运行，都能找到 DELRec 包
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import torch
 import pytorch_lightning as pl
 from argparse import ArgumentParser
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from DELRec.distill_pattern_from_conventional_SR_models.train import training_of_first_stage
-from DELRec.llms_based_sr.train import training_of_second_stage
+from llms_based_sr.train import training_of_second_stage
 from test_DELRec import test
 
 
@@ -31,8 +33,8 @@ def main(args):
         if args.llm == 'llama3':
             # ── LLaMA3 完整两阶段 ─────────────────────────────────────────────
             # 第一阶段：冻结 LLM，只训练 soft-prompt（TA + RPS 双任务）
-            from DELRec.llms.llama3_stage1 import training_of_first_stage_llama3
-            from DELRec.data.amazon_loader import load_amazon_dataset
+            from llms.llama3_stage1 import training_of_first_stage_llama3
+            from data.amazon_loader import load_amazon_dataset
             splits, _ = load_amazon_dataset(
                 dataset_version=args.amazon_version,
                 category=args.amazon_category,
@@ -46,10 +48,11 @@ def main(args):
                 auto_download=True,
             )
             soft_prompt_path = training_of_first_stage_llama3(args, splits)
-            # 第二阶段：加载 soft-prompt，解冻 LLM，AdaLoRA 微调
+            # 第二阶段：加载 soft-prompt，解冻 LLM，LoRA 微调
             training_of_second_stage(args, soft_prompt_path)
         else:
-            # ── 原始 T5 / openprompt 两阶段 ──────────────────────────────────
+            # ── 原始 T5 / openprompt 两阶段（需要原始 DELRec 完整代码）──────────
+            from distill_pattern_from_conventional_SR_models.train import training_of_first_stage
             learned_soft_prompt = training_of_first_stage(args)
             training_of_second_stage(args, learned_soft_prompt)
     else:

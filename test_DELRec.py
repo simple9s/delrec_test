@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from DELRec.utils import (
+from utils import (
     init_metrics, update_metrics, finalize_metrics, metrics_to_str, EVAL_KS,
 )
 
@@ -31,10 +31,10 @@ def test(args):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _test_llama3(args):
-    from DELRec.llms.llama3_wrapper import (
+    from llms.llama3_wrapper import (
         LLaMA3Recommender, load_llama3_tokenizer, collate_llama3_batch
     )
-    from DELRec.data.amazon_loader import load_amazon_dataset
+    from data.amazon_loader import load_amazon_dataset
     from torch.utils.data import DataLoader, Dataset
 
     ks             = getattr(args, 'eval_ks', EVAL_KS)
@@ -100,14 +100,14 @@ def _test_openprompt(args):
     from openprompt.plms import load_plm
     from openprompt.prompts import ManualVerbalizer
     from peft import AdaLoraConfig, get_peft_model
-    from DELRec.llms_based_sr.llms_based_sequential_recommendation import (
+    from llms_based_sr.llms_based_sequential_recommendation import (
         load_LSR_prompt, load_LSR_dataset
     )
 
     ks = getattr(args, 'eval_ks', EVAL_KS)
 
     if getattr(args, 'use_amazon', False):
-        from DELRec.llms_based_sr.amazon_lsr_dataset import load_amazon_LSR_dataset
+        from llms_based_sr.amazon_lsr_dataset import load_amazon_LSR_dataset
         _, test_loader, _ = load_amazon_LSR_dataset(args)
     else:
         _, test_loader, _ = load_LSR_dataset(args)

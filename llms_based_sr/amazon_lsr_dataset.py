@@ -12,9 +12,9 @@ import os
 from openprompt import PromptDataLoader
 from openprompt.plms import load_plm
 
-from DELRec.data.amazon_loader import load_amazon_dataset
-from DELRec.dataload import amazon_data_partition, amazon_to_input_examples
-from DELRec.utils import create_prompt
+from data.amazon_loader import load_amazon_dataset
+from dataload import amazon_data_partition, amazon_to_input_examples
+from utils import create_prompt
 
 
 def load_amazon_LSR_dataset(args):
