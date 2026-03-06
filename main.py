@@ -11,7 +11,7 @@ import sys
 import os
 # 确保无论从哪个目录运行，都能找到 DELRec 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+print(111)
 import torch
 import pytorch_lightning as pl
 from argparse import ArgumentParser
