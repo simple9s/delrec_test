@@ -157,15 +157,13 @@ def training_of_second_stage_llama3(args, learned_soft_prompt_path: str = None):
 
     loss_func  = nn.CrossEntropyLoss()
     best_hit10 = 0.0
-    grad_accum = args.second_gradient_accumulation_steps
-    eval_every = args.second_eval_every_steps
-    glb_step = actual_step = 0
+    primary_k  = 10 if 10 in ks else ks[-1]
 
     # ── 训练循环 ──────────────────────────────────────────────────────────────
     for epoch in tqdm(range(args.second_total_epoch), desc='Epoch'):
         model.train()
         model.classifier.train()
-        tot_loss     = 0.0
+        tot_loss      = 0.0
         epoch_metrics = init_metrics(ks)
 
         for step, batch in enumerate(train_loader):
@@ -173,50 +171,38 @@ def training_of_second_stage_llama3(args, learned_soft_prompt_path: str = None):
             attention_mask = batch['attention_mask'].to(device)
             labels         = batch['labels'].to(device)
 
-            logits = model(input_ids, attention_mask)   # (B, num_candidates)
+            logits = model(input_ids, attention_mask)
             loss   = loss_func(logits, labels)
             loss.backward()
-            tot_loss += loss.item()
+            torch.nn.utils.clip_grad_norm_(
+                filter(lambda p: p.requires_grad, model.parameters()), 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+            scheduler.step()
 
-            # 累积训练指标
+            tot_loss += loss.item()
             probs = F.softmax(logits.detach(), dim=-1)
             ranks = (torch.argsort(probs, descending=True)
                      == labels.unsqueeze(-1)).nonzero(as_tuple=False)[:, -1] + 1
             update_metrics(epoch_metrics, ranks, ks)
 
-            actual_step += 1
-            if actual_step % grad_accum == 0:
-                torch.nn.utils.clip_grad_norm_(
-                    filter(lambda p: p.requires_grad, model.parameters()), 1.0)
-                optimizer.step()
-                optimizer.zero_grad()
-                scheduler.step()
-                glb_step += 1
+            if step % 100 == 0:
+                print(f"  Epoch {epoch}  step {step}/{len(train_loader)}  "
+                      f"loss={tot_loss/(step+1):.4f}")
 
-            if step % 100 == 1:
-                avg = tot_loss / (step + 1)
-                print(f"  Epoch {epoch}  step {step}  loss={avg:.4f}")
+        # ── 每个 epoch 结束验证一次 ────────────────────────────────────────────
+        train_final = finalize_metrics(epoch_metrics, ks)
+        val_metrics = _evaluate_llama3(model, val_loader, device, ks)
+        print(f"\n[Epoch {epoch}] loss={tot_loss/max(len(train_loader),1):.4f}")
+        print(f"  train: {metrics_to_str(train_final, ks)}")
+        print(f"  val:   {metrics_to_str(val_metrics, ks)}")
 
-            # ── 验证 ──────────────────────────────────────────────────────────
-            if (actual_step % grad_accum == 0 and glb_step > 0
-                    and glb_step % eval_every == 0):
-                val_metrics = _evaluate_llama3(model, val_loader, device, ks)
-                train_now   = finalize_metrics(epoch_metrics, ks)
-                print(f"  [Val]   {metrics_to_str(val_metrics, ks)}")
-                print(f"  [Train] {metrics_to_str(train_now,  ks)}")
-
-                primary_k = 10 if 10 in ks else ks[-1]
-                if val_metrics[f'hit@{primary_k}'] > best_hit10:
-                    best_hit10 = val_metrics[f'hit@{primary_k}']
-                    model.save(args.second_model_path)
-                    print(f"  ✓ 保存模型  (best hit@{primary_k}={best_hit10:.4f})")
-
-                model.train()
-                model.classifier.train()
-
-        ep_final = finalize_metrics(epoch_metrics, ks)
-        print(f"\n[Epoch {epoch}] loss={tot_loss/max(len(train_loader),1):.4f}  "
-              f"{metrics_to_str(ep_final, ks)}\n")
+        if val_metrics[f'hit@{primary_k}'] > best_hit10:
+            best_hit10 = val_metrics[f'hit@{primary_k}']
+            model.save(args.second_model_path)
+            print(f"  ✓ 已保存 (best Hit@{primary_k}={best_hit10:.4f})\n")
+        else:
+            print()
 
     return args.second_model_path
 

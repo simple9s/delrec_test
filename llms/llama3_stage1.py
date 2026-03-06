@@ -438,10 +438,6 @@ def training_of_first_stage_llama3(args, splits: dict) -> str:
 
     loss_func   = nn.CrossEntropyLoss()
     best_hit    = 0.0
-    grad_accum  = args.first_gradient_accumulation_steps
-    eval_every  = args.first_eval_every_steps
-    glb_step = actual_step = 0
-
     soft_prompt_save_path = getattr(args, 'first_learned_soft_prompt_path',
                                     './stage1_soft_prompt')
 
@@ -460,27 +456,23 @@ def training_of_first_stage_llama3(args, splits: dict) -> str:
             ta_batch  = batch.get('TA')
             rps_batch = batch.get('RPS')
 
-            # 至少需要一个任务有数据
             if ta_batch is None and rps_batch is None:
                 continue
 
             loss_ta  = None
             loss_rps = None
 
-            # ── TA 前向 ──────────────────────────────────────────────────────
             if ta_batch is not None:
                 ta_ids    = ta_batch['input_ids'].to(device)
                 ta_mask   = ta_batch['attention_mask'].to(device)
                 ta_labels = ta_batch['labels'].to(device)
                 ta_logits = model.forward_ta(ta_ids, ta_mask)
                 loss_ta   = loss_func(ta_logits, ta_labels)
-                # 累积指标
-                ranks_ta = (torch.argsort(F.softmax(ta_logits.detach(), dim=-1),
-                                          descending=True)
-                            == ta_labels.unsqueeze(-1)).nonzero(as_tuple=False)[:, -1] + 1
+                ranks_ta  = (torch.argsort(F.softmax(ta_logits.detach(), dim=-1),
+                                           descending=True)
+                             == ta_labels.unsqueeze(-1)).nonzero(as_tuple=False)[:, -1] + 1
                 update_metrics(epoch_metrics, ranks_ta, ks)
 
-            # ── RPS 前向 ─────────────────────────────────────────────────────
             if rps_batch is not None:
                 rps_ids    = rps_batch['input_ids'].to(device)
                 rps_mask   = rps_batch['attention_mask'].to(device)
@@ -492,55 +484,44 @@ def training_of_first_stage_llama3(args, splits: dict) -> str:
                               == rps_labels.unsqueeze(-1)).nonzero(as_tuple=False)[:, -1] + 1
                 update_metrics(epoch_metrics, ranks_rps, ks)
 
-            # ── 动态损失权重（两任务都有时）────────────────────────────────────
             if loss_ta is not None and loss_rps is not None:
-                # 用 soft_embeddings 参数作为共享参数
                 shared_params = model.get_soft_prompt_params()
-                if shared_params:
-                    loss = dynamic_loss_weighting(loss_ta, loss_rps,
-                                                  shared_params[0])
-                else:
-                    loss = 0.5 * loss_ta + 0.5 * loss_rps
+                loss = dynamic_loss_weighting(loss_ta, loss_rps,
+                                              shared_params[0] if shared_params else None)
             elif loss_ta is not None:
                 loss = loss_ta
             else:
                 loss = loss_rps
 
             loss.backward()
-            tot_loss  += loss.item()
-            n_steps   += 1
-            actual_step += 1
+            torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+            scheduler.step()
 
-            if actual_step % grad_accum == 0:
-                torch.nn.utils.clip_grad_norm_(trainable_params, 1.0)
-                optimizer.step()
-                optimizer.zero_grad()
-                scheduler.step()
-                glb_step += 1
+            tot_loss += loss.item()
+            n_steps  += 1
 
-            if step % 100 == 1:
-                print(f"  [Stage1 Epoch {epoch}] step={step}  "
+            if step % 100 == 0:
+                print(f"  [Stage1 Epoch {epoch}] step={step}/{len(train_loader)}  "
                       f"loss={tot_loss/n_steps:.4f}")
 
-            # ── 验证 & 保存 ────────────────────────────────────────────────────
-            if (actual_step % grad_accum == 0 and glb_step > 0
-                    and glb_step % eval_every == 0):
-                val_m = _evaluate_stage1(model, val_loader, device, ks)
-                primary_k = 10 if 10 in ks else ks[-1]
-                if val_m[f'hit@{primary_k}'] > best_hit:
-                    best_hit = val_m[f'hit@{primary_k}']
-                    model.save_soft_prompt(soft_prompt_save_path)
-                    print(f"  ✓ [Stage1] 保存  val: {metrics_to_str(val_m, ks)}")
-
-                model.ta_head.train()
-                model.rps_head.train()
-                if backbone.soft_embeddings is not None:
-                    backbone.soft_embeddings.train()
-
-        ep = finalize_metrics(epoch_metrics, ks)
+        # ── 每个 epoch 结束验证一次 ────────────────────────────────────────────
+        train_m = finalize_metrics(epoch_metrics, ks)
+        val_m   = _evaluate_stage1(model, val_loader, device, ks)
+        primary_k = 10 if 10 in ks else ks[-1]
         print(f"\n[Stage1 Epoch {epoch}] "
               f"loss={tot_loss/max(n_steps,1):.4f}  "
-              f"{metrics_to_str(ep, ks)}\n")
+              f"train: {metrics_to_str(train_m, ks)}")
+        print(f"                      "
+              f"val:   {metrics_to_str(val_m, ks)}")
+
+        if val_m[f'hit@{primary_k}'] > best_hit:
+            best_hit = val_m[f'hit@{primary_k}']
+            model.save_soft_prompt(soft_prompt_save_path)
+            print(f"  ✓ 已保存 (best Hit@{primary_k}={best_hit:.4f})\n")
+        else:
+            print()
 
     # 训练结束确保保存一次（防止验证步骤未触发）
     if not os.path.exists(os.path.join(soft_prompt_save_path, 'stage1.pt')):
