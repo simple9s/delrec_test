@@ -165,24 +165,31 @@ class LLaMA3Recommender(nn.Module):
                     param.requires_grad = False
 
     def _get_last_hidden(self, inputs_embeds, attention_mask):
-        """用 hook 只捕获最后一层隐向量，避免 output_hidden_states=True 存全部28层。"""
+        """用 hook 只捕获最后一层隐向量。兼容原始模型和 PeftModel 包装。"""
         last_hidden = {}
 
         def hook(module, input, output):
-            # output[0] shape: (B, seq_len, H)
             last_hidden['h'] = output[0]
 
-        # 注册到最后一个 decoder layer
-        handle = self.llm.model.layers[-1].register_forward_hook(hook)
+        # 兼容 PeftModel（apply_lora 后）和原始 LlamaForCausalLM
         try:
-            self.llm(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-            )
+            # PeftModel: self.llm.base_model.model.model.layers
+            layers = self.llm.base_model.model.model.layers
+        except AttributeError:
+            try:
+                # 原始模型: self.llm.model.layers
+                layers = self.llm.model.layers
+            except AttributeError:
+                # 再退一层: self.llm.model.model.layers
+                layers = self.llm.model.model.layers
+
+        handle = layers[-1].register_forward_hook(hook)
+        try:
+            self.llm(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
         finally:
             handle.remove()
 
-        return last_hidden['h']   # (B, seq_len, H)
+        return last_hidden['h']  # (B, seq_len, H)
 
     # ── 前向传播 ──────────────────────────────────────────────────────────────
 
