@@ -202,7 +202,8 @@ class LLaMA3Recommender(nn.Module):
 
         if self.soft_embeddings is not None:
             token_embeds   = self.llm.get_input_embeddings()(input_ids)
-            soft_tok_idx   = torch.arange(self.soft_prompt_len, device=input_ids.device)
+            soft_tok_idx   = torch.arange(self.soft_prompt_len,
+                                          device=self.soft_embeddings.weight.device)
             soft_emb       = self.soft_embeddings(soft_tok_idx).to(token_embeds.device)
             soft_emb       = soft_emb.unsqueeze(0).expand(B, -1, -1)
             inputs_embeds  = torch.cat([soft_emb, token_embeds], dim=1)

@@ -85,9 +85,11 @@ def _test_llama3(args):
     use_cuda = args.device == 'cuda' and torch.cuda.is_available()
     device   = torch.device('cuda' if use_cuda else 'cpu')
     model.classifier = model.classifier.to(device)
+    if model.soft_embeddings is not None:
+        model.soft_embeddings = model.soft_embeddings.to(device)
     model.eval()
 
-    return _run_eval(model, test_loader, device, ks, mode='llama3')
+    return _run_eval(model, test_loader, device, ks, mode='llama3', args=args)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -151,14 +153,14 @@ def _test_openprompt(args):
     if use_cuda:
         prompt_model = prompt_model.to(device)
 
-    return _run_eval(prompt_model, test_loader, device, ks, mode='openprompt')
+    return _run_eval(prompt_model, test_loader, device, ks, mode='openprompt', args=args)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 通用评估循环
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _run_eval(model, dataloader, device, ks, mode: str = 'llama3'):
+def _run_eval(model, dataloader, device, ks, mode: str = 'llama3', args=None):
     model.eval()
     global_metrics = init_metrics(ks)
 
@@ -172,7 +174,6 @@ def _run_eval(model, dataloader, device, ks, mode: str = 'llama3'):
                 labels         = batch['labels'].to(device)
                 logits         = model(input_ids, attention_mask)
             else:
-                # openprompt 模式
                 if str(device) != 'cpu':
                     batch = batch.cuda()
                 logits = model(batch)
@@ -195,4 +196,72 @@ def _run_eval(model, dataloader, device, ks, mode: str = 'llama3'):
         print(f"  Hit@{k:<3d} = {final[f'hit@{k}']:.4f}    "
               f"NDCG@{k:<3d} = {final[f'ndcg@{k}']:.4f}")
     print("══════════════════════════════\n")
+
+    # ── 保存结果到文件 ─────────────────────────────────────────────────────────
+    _save_results(final, global_metrics, ks, args)
+
     return final
+
+
+def _save_results(final: dict, global_metrics: dict, ks: list, args=None):
+    """将测试结果同时保存为 JSON 和可读 TXT。"""
+    import json
+    import datetime
+
+    # 确定保存目录（与模型同级）
+    save_dir = '.'
+    if args is not None:
+        model_path = getattr(args, 'second_model_path', './model_llama3')
+        save_dir = os.path.dirname(os.path.abspath(model_path)) if model_path else '.'
+    os.makedirs(save_dir, exist_ok=True)
+
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # ── JSON（机器可读，方便后续对比实验）────────────────────────────────────
+    record = {
+        'timestamp'   : timestamp,
+        'num_samples' : global_metrics['count'],
+        'metrics'     : {f'hit@{k}': round(final[f'hit@{k}'], 6) for k in ks} |
+                        {f'ndcg@{k}': round(final[f'ndcg@{k}'], 6) for k in ks},
+    }
+    if args is not None:
+        record['config'] = {
+            'llm'             : getattr(args, 'llm', ''),
+            'llm_path'        : getattr(args, 'llm_path', ''),
+            'amazon_version'  : getattr(args, 'amazon_version', ''),
+            'amazon_category' : getattr(args, 'amazon_category', ''),
+            'num_candidates'  : getattr(args, 'num_candidates', 100),
+            'second_lora_r'   : getattr(args, 'second_lora_r', 16),
+            'soft_prompt_len' : getattr(args, 'soft_prompt_len', 100),
+        }
+
+    json_path = os.path.join(save_dir, f'results_{timestamp}.json')
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(record, f, indent=2, ensure_ascii=False)
+
+    # ── TXT（人类可读）───────────────────────────────────────────────────────
+    txt_path = os.path.join(save_dir, f'results_{timestamp}.txt')
+    lines = [
+        f"测试时间: {timestamp}",
+        f"样本总数: {global_metrics['count']}",
+        "",
+    ]
+    if args is not None:
+        lines += [
+            f"模型: {getattr(args, 'llm_path', '')}",
+            f"数据集: Amazon {getattr(args, 'amazon_version', '')} / {getattr(args, 'amazon_category', '')}",
+            f"LoRA r={getattr(args, 'second_lora_r', 16)}  soft_prompt_len={getattr(args, 'soft_prompt_len', 100)}",
+            "",
+        ]
+    lines.append(f"{'指标':<12} {'值':>10}")
+    lines.append("-" * 24)
+    for k in ks:
+        lines.append(f"Hit@{k:<8} {final[f'hit@{k}']:>10.4f}")
+        lines.append(f"NDCG@{k:<7} {final[f'ndcg@{k}']:>10.4f}")
+
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+
+    print(f"[结果已保存]")
+    print(f"  JSON → {json_path}")
+    print(f"  TXT  → {txt_path}")

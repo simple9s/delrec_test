@@ -179,8 +179,8 @@ python main.py \
     --num_candidates 100 \
     --eval_ks 1 5 10 20 \
     --second_batch_size 8 \
-    --second_total_epoch 2 \
-    --first_total_epoch  2 \
+    --second_total_epoch 1 \
+    --first_total_epoch  0 \
     --second_model_path ./model_beauty
 ```
 
@@ -194,6 +194,14 @@ python -m DELRec.main \
     --amazon_version 2018 \
     --amazon_category Movies_and_TV \
     --second_model_path ./model_llama3
+
+python main.py \
+    --llm llama3 \
+    --llm_path meta-llama/Llama-3.2-3B-Instruct \
+    --mode test \
+    --amazon_version 2018 \
+    --amazon_category Luxury_Beauty \
+    --second_model_path ./model_beauty
 ```
 
 ### 使用原始 T5 流程（两阶段训练）
